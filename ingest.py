@@ -143,16 +143,47 @@ def scrape_reddit_thread(url: str) -> str:
     return clean_text("\n\n".join(parts))
 
 
+def _next_word_start(text: str, pos: int) -> int:
+    """Return the index of the start of the next complete word at or after pos."""
+    length = len(text)
+    # If we landed mid-word, skip to the end of the current word
+    if pos > 0 and pos < length and text[pos - 1] not in (" ", "\n", "\t"):
+        while pos < length and text[pos] not in (" ", "\n", "\t"):
+            pos += 1
+    # Skip any whitespace to reach the start of the next word
+    while pos < length and text[pos] in (" ", "\n", "\t"):
+        pos += 1
+    return pos
+
+
 def chunk_text(text: str, source_name: str) -> list[dict]:
     """
-    Split text into chunks of CHUNK_SIZE chars with OVERLAP overlap.
-    Each chunk carries the source filename and its index within that document.
+    Split text into ~CHUNK_SIZE char pieces with OVERLAP overlap.
+    Both the start and end of each chunk snap to word boundaries so no chunk
+    begins or ends mid-word. The nominal advance step is CHUNK_SIZE - OVERLAP.
     """
     chunks = []
-    start = 0
     index = 0
-    while start < len(text):
-        end = start + CHUNK_SIZE
+    length = len(text)
+    step = CHUNK_SIZE - OVERLAP  # nominal advance: 450 chars
+
+    nominal_start = 0
+    while nominal_start < length:
+        # Snap start forward to nearest word boundary
+        start = _next_word_start(text, nominal_start)
+        if start >= length:
+            break
+
+        end = min(start + CHUNK_SIZE, length)
+
+        # Snap end backward to a word boundary (only when not at the text end)
+        if end < length:
+            nl = text.rfind("\n", start + step, end)
+            sp = text.rfind(" ",  start + step, end)
+            boundary = nl if nl != -1 else sp
+            if boundary != -1:
+                end = boundary
+
         chunk = text[start:end].strip()
         if chunk:
             chunks.append({
@@ -161,7 +192,9 @@ def chunk_text(text: str, source_name: str) -> list[dict]:
                 "chunk_index": index,
             })
             index += 1
-        start += CHUNK_SIZE - OVERLAP
+
+        nominal_start += step  # advance by fixed step from the nominal (pre-snap) position
+
     return chunks
 
 
